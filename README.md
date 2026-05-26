@@ -18,42 +18,38 @@ cd "AFK Validator"
 *(Note: Replace `<YOUR_GITHUB_REPO_URL>` with your actual GitHub repository URL once uploaded).*
 
 ### 3. Set Up a Virtual Environment (Recommended)
-It is best practice to run this in an isolated environment to avoid dependency conflicts.
-```bash
-# Create a virtual environment
+It is best practice to run this in an isolated environment to avoid dependency conflicts. Open your Command Prompt (cmd) or PowerShell and run:
+```cmd
 python -m venv venv
 
-# Activate the virtual environment
-# On Mac/Linux:
-source venv/bin/activate
-# On Windows:
-# venv\Scripts\activate
+# Activate the virtual environment on Windows
+venv\Scripts\activate
 ```
 
 ### 4. Install Dependencies
 Install all required libraries for the FastAPI backend and Streamlit frontend:
-```bash
+```cmd
 pip install -r backend/requirements.txt
 pip install reportlab streamlit requests
 ```
 
 ### 5. Generate Test Data (Optional)
-To verify the system works, you can generate a mock bank statement (`test_statement.pdf`) with carefully planted anomalies (like a stray '1' causing a column bleed):
-```bash
+To verify the system works, you can generate a mock bank statement (`test_statement.pdf`) with carefully planted anomalies:
+```cmd
 python generate_sample.py
 ```
 
-### 6. Run the Application
-You can start both the FastAPI backend and the Streamlit UI with a single command using the provided script.
+### 6. Run the Application (Manual Steps)
+You will need to open **two separate terminal/command prompt windows** (make sure the virtual environment is activated in both).
 
-First, ensure the script is executable (Mac/Linux only):
-```bash
-chmod +x run.sh
+**Terminal 1 (Backend):**
+```cmd
+uvicorn backend.app.main:app --reload --port 8000
 ```
 
-Then, run the app:
-```bash
-./run.sh
+**Terminal 2 (Frontend):**
+```cmd
+streamlit run frontend_streamlit/app.py
 ```
 The Streamlit interface will automatically open in your browser (usually at `http://localhost:8501`). You can now upload `test_statement.pdf` and view the annotated results live!
 

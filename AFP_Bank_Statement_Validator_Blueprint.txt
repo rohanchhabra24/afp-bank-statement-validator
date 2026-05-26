@@ -1,0 +1,380 @@
+
+AFP BANK STATEMENT VALIDATOR
+
+Complete Solution Blueprint  ·  Hackathon Edition
+
+Problem
+AFP document parsing & validation for bank statements
+Output
+Structured XML/PDF with highlighted anomalies
+Approach
+Phased POC → Production pipeline with AI augmentation
+
+⚡  Hackathon Strategy
+  › Each phase is a self-contained deliverable — if we're cut at any stage, we have something working
+  › Phase 1 POC is purely about proving AFP → structured data works (even if ugly)
+  › Validation logic is modular — every rule is a plug-in, easy to demo new rules live
+  › Highlighting in output PDF is the most visual, jury-friendly feature — prioritise it
+
+1.  Problem Statement & Reality Check
+1.1  What AFP Actually Is
+AFP (Advanced Function Presentation) is IBM's binary page-description language — the financial industry's PostScript. Banks use it because it has been in production since the 1980s, it is exact (pixel-perfect), and it is deeply embedded in mainframe print pipelines. The format stores structured objects: pages, data objects, presentation text, graphics, and overlays, all encoded in a proprietary binary stream with structured fields (SFs) and tagged logical elements (TLEs).
+
+⚠  Hard Truth About AFP Parsing
+  › There is no lightweight open-source AFP parser in Python or Node that handles complex bank statements out of the box
+  › Apache FOP generates AFP; it does not consume it — people confuse these
+  › IBM's own AFP tooling (AFP Workbench, AFP Viewer) is Windows-only, expensive, and has no API
+  › afplib (Python) is the closest open-source option — partial support, handles basic MO:DCA structures
+  › Realistic POC path: AFP → PDF via a conversion step first, then parse the PDF
+
+1.2  The Validation Problem In Detail
+Once we have the document in a parseable form, we face a structured extraction and rule-validation problem. Based on the problem statement, the key anomalies to detect are:
+
+#
+Anomaly Type
+Example
+Detection Method
+1
+Date format violation
+31-12-2024 instead of DD/MM/YYYY
+Regex + format normalisation
+2
+Date value error
+31/02/2024 (Feb has no 31st)
+Date parsing + calendar validation
+3
+Column bleed / amount split
+'2' in Party col, '400' in Debit — was '2,400'
+Positional OCR analysis + neighbour check
+4
+Sign mismatch
+Debit column has negative sign unexpectedly
+Column-type rule + value sign check
+5
+Balance arithmetic drift
+Opening + debits - credits ≠ closing balance
+Running total reconciliation
+6
+Missing value
+Cell in mandatory column is blank
+Null / empty cell detection
+7
+Thousand-separator misparse
+1.000,00 vs 1,000.00 locale confusion
+Locale fingerprinting + normalisation
+8
+Duplicate transaction
+Same date + amount + party appears twice
+Row-level deduplication hash
+
+2.  Complete Working Solution
+2.1  The Realistic POC (What We Build in a Hackathon)
+A hackathon POC does not need to handle every edge case. It needs to convince the judges that the pipeline is real, the validation logic is solid, and the output is useful. Here is what 'complete working' means in this context:
+
+AFP → Intermediate Format → Parse → Validate → Annotated Output PDF
+
+Step 1 — AFP to PDF/Text Conversion
+We use a conversion layer rather than building a native AFP parser from scratch. Two realistic options:
+
+Option
+Tool
+How
+Pros
+Cons
+A (preferred)
+afplib + custom renderer
+Parse MO:DCA structure → extract text with coordinates
+Open source, no licensing
+Limited to text-only AFP
+B (fallback)
+IBM AFP Conversion tool / iText / Snowbound
+Commercial SDK or Docker image with REST API
+Handles full AFP spec
+Cost, licensing
+C (hackathon cheat)
+Pre-convert sample files to PDF, start from PDF
+Use pdfplumber / pdfminer to extract tables
+Works in 2 hours
+Only valid if real AFP not available yet
+
+Hackathon Recommendation
+  › If you have real AFP files: use afplib to extract text + coordinate data, build coordinate-aware table parser
+  › If you do NOT have real AFP yet: build the full validation + highlight pipeline on PDF/CSV, plug AFP conversion in later
+  › Either way — present the architecture as complete; the conversion step is a connector, not the core value
+
+Step 2 — Table Structure Extraction
+Bank statements from AFP have a fixed columnar layout. We exploit this by treating the document as a coordinate grid:
+	•	Extract all text tokens with their (x, y, page) bounding boxes
+	•	Cluster tokens into rows by y-coordinate proximity (within ±3pt = same row)
+	•	Cluster columns by x-coordinate ranges — since AFP is pixel-exact, column positions are consistent across all rows
+	•	Map columns to semantic roles: Party Name, Debit, Credit, Balance using header row labels OR positional heuristics (rightmost numeric columns = financial columns)
+	•	Output: a DataFrame / JSON array of structured rows — each row is one transaction
+
+Step 3 — Validation Engine
+Each validation rule is an independent module that takes a row (or a set of rows) and returns a list of ValidationIssue objects. This makes the rules easy to demo, toggle, and extend.
+
+Rule Module
+Input
+Output Issue Type
+DateFormatValidator
+date_string from each row
+INVALID_DATE_FORMAT | IMPOSSIBLE_DATE
+AmountColumnValidator
+all numeric cells per row with coordinates
+COLUMN_BLEED | SPLIT_NUMBER | SIGN_ERROR
+BalanceReconciler
+full transaction array (ordered)
+BALANCE_DRIFT | RUNNING_TOTAL_MISMATCH
+NullFieldChecker
+row object, required_columns config
+MISSING_MANDATORY_FIELD
+DuplicateDetector
+full transaction array
+DUPLICATE_ROW
+LocaleNormaliser
+raw amount strings
+LOCALE_AMBIGUITY | FORMAT_INCONSISTENCY
+
+Step 4 — Annotated Output Generation
+The output is a PDF where each validation issue is visually marked. We use reportlab (Python) or pdfplumber + PyMuPDF to overlay highlights and margin annotations:
+	•	RED highlight — critical errors (impossible date, balance mismatch, column bleed)
+	•	AMBER highlight — warnings (format inconsistency, locale ambiguity)
+	•	GREEN annotation — auto-corrected values shown in margin
+	•	Summary table on last page — all issues with severity, row reference, rule name
+	•	Machine-readable sidecar JSON — same issue list for downstream systems
+
+3.  Solution Architecture
+3.1  Component Overview
+
+INPUT LAYER  →  CONVERSION  →  EXTRACTION  →  VALIDATION  →  OUTPUT LAYER
+
+📥 INPUT
+AFP files via upload API or filesystem watch
+⚙️ CONVERT
+AFP → PDF or coordinate-tagged XML via afplib / conversion SDK
+🔍 EXTRACT
+Table parser: text + bounding boxes → structured rows
+✅ VALIDATE
+Rule engine: pluggable validators, issue objects
+📤 OUTPUT
+Annotated PDF + JSON report + XML export
+
+3.2  Technology Stack
+
+Layer
+Technology
+Why This Choice
+AFP Parsing
+afplib (Python) + custom MO:DCA walker
+Only viable open-source option; write a thin wrapper to normalise output
+Coordinate Extraction
+pdfplumber / PyMuPDF (fallback path)
+Battle-tested, exposes token bounding boxes needed for column detection
+Table Reconstruction
+Custom Python: row/col clustering by bbox
+Off-the-shelf table detectors (Camelot, Tabula) assume PDF tables — AFP-extracted PDFs often lack proper table metadata
+Validation Engine
+Pure Python dataclasses + rule registry
+Zero dependencies, easy to unit test, fast to demo
+Output PDF Annotation
+PyMuPDF (fitz) highlight + annotation API
+Best-in-class coordinate-aware PDF annotation in Python
+API / Orchestration
+FastAPI (Python)
+Fast to set up, auto-generates Swagger docs for judge demos
+Frontend (Demo UI)
+React + TailwindCSS
+Upload AFP → view annotated PDF side-by-side with issue list
+Containerisation
+Docker + docker-compose
+One-command setup — judges can run it locally without any installs
+
+3.3  Data Flow — Detailed
+
+Request Lifecycle
+  › 1.  Client POST /validate  →  uploads AFP file(s)
+  › 2.  AFP Converter decodes MO:DCA structure → Page objects with positioned text tokens
+  › 3.  Table Extractor groups tokens into rows (y-clustering) and columns (x-range mapping)
+  › 4.  Schema Detector identifies column semantics: DATE | PARTY | DEBIT | CREDIT | BALANCE
+  › 5.  Validation Runner passes each row through each active rule module
+  › 6.  Issue Aggregator deduplicates and scores issues (CRITICAL / WARNING / INFO)
+  › 7.  Annotator overlays coloured highlights on source PDF at original bounding-box coordinates
+  › 8.  Response: { annotated_pdf: base64, issues: [...], summary: {...} }
+
+3.4  Key Design Decisions & Trade-offs
+
+Decision
+Chosen Approach
+Alternative
+Why We Chose This
+AFP parsing
+afplib + coordinate extraction
+Commercial AFP SDK
+Zero cost, works for demo; commercial can be swapped in for production
+Validation model
+Rule-per-class pattern
+Single monolithic validator
+Each rule is independently testable; easy to add rules live during the demo
+Column detection
+Coordinate clustering
+ML-based layout detection
+AFP is pixel-exact — heuristic clustering is faster and more reliable for structured bank docs
+Output format
+Annotated PDF + JSON sidecar
+Excel / inline HTML report
+Visual annotation in PDF is most impressive for judges; JSON is the machine interface
+Running total check
+Row-by-row reconciliation
+End-to-end only
+Row-level pinpoints exactly where the drift started — much more useful for auditors
+
+4.  How We Could Enhance the Solution
+4.1  Near-Term Enhancements (Post-Hackathon Sprint)
+
+Phase 2 Improvements
+  › Multi-document batch processing: accept a ZIP of AFP files, validate all in parallel, return a consolidated report
+  › Configurable rule sets: different banks have different date formats / column layouts — load per-client rules from a YAML config
+  › Auto-correction suggestions: instead of just flagging 'column bleed', propose the correct merged value and confidence score
+  › Structured XML output: export validated, normalised transaction data as ISO 20022-compatible XML for downstream ingestion
+  › Audit trail: every issue gets a rule version hash + timestamp so corrections are traceable
+
+4.2  AI / LLM Augmentation
+
+Enhancement
+How
+Value
+Ambiguity resolution
+Send ambiguous rows to LLM with context (neighbouring rows, column header, running total) — ask it to infer the correct value
+Handles edge cases the rule engine cannot deterministically resolve
+Layout auto-detection
+Fine-tune a layout model (LayoutLM or DocFormer) on bank statement templates — auto-maps columns without hardcoding
+Handles new bank formats without code changes
+Natural language query
+Allow auditor to ask 'show me all transactions above 1 lakh where debit column has anomalies' — LLM translates to filter
+Makes tool accessible to non-technical compliance staff
+Anomaly explanation
+For each flagged issue, LLM generates a plain-English explanation and suggested remediation
+Drastically reduces time for auditors to understand each flag
+Schema learning
+First 10 documents train a per-client template model — system learns column layouts automatically
+Zero-config onboarding for new bank clients
+
+4.3  Production-Grade Improvements
+
+	•	Message queue (Kafka / RabbitMQ): decouple file ingestion from processing — handle burst loads from banks submitting end-of-day batches
+	•	Distributed processing: each AFP file processed by a worker pod (Kubernetes) — horizontally scalable
+	•	Result caching: SHA-256 hash of input AFP → skip reprocessing unchanged files
+	•	Webhook callbacks: bank systems receive a callback when their document is processed — no polling
+	•	Role-based output: compliance officer sees full annotations; bank clerk sees only correctable errors; API consumer sees raw JSON
+	•	SOC 2 / data residency: PII masking option — hash party names in transit, unmask only in authorised rendering layer
+	•	Multi-format input: extend to handle SWIFT MT statements, CSV exports, OFX — same validation engine, different parsers
+
+5.  Complete Pipeline Development Plan
+5.1  Hackathon Phase Plan
+Each phase is a shippable increment. If elimination happens after any phase, we have a working demo.
+
+PHASE 1
+Hours 1–3
+POC — AFP In, Structured Data Out
+  ✓  Set up project repo, Docker container, FastAPI skeleton
+  ✓  Implement AFP loader using afplib — extract text tokens with (x, y) coordinates per page
+  ✓  Build naive table extractor: sort tokens by y → rows, sort by x within row → columns
+  ✓  Hardcode column mapping for sample bank statement (Date | Party | Debit | Credit | Balance)
+  ✓  Output: raw DataFrame printed to console or returned as JSON
+  ✓  Success criteria: given a sample AFP, we can see the transactions as structured rows
+
+PHASE 2
+Hours 3–6
+Validation Engine Live
+  ✓  Build ValidationIssue dataclass: { rule, severity, row_index, column, raw_value, message }
+  ✓  Implement DateFormatValidator — regex check + dateutil.parse for impossible dates
+  ✓  Implement AmountColumnValidator — detect split numbers using coordinate gap heuristic
+  ✓  Implement BalanceReconciler — running total across all rows, flag first divergent row
+  ✓  Implement NullFieldChecker — configurable required fields list
+  ✓  Unit test each validator with crafted test rows (10 per rule minimum)
+  ✓  Success criteria: given a statement with planted errors, all are detected and surfaced
+
+PHASE 3
+Hours 6–9
+Annotated PDF Output
+  ✓  Convert AFP → PDF (use existing conversion step or pre-converted sample)
+  ✓  Use PyMuPDF to open the PDF and annotate at original bounding-box coordinates
+  ✓  RED highlight for CRITICAL issues; AMBER for WARNINGs — applied at token bbox
+  ✓  Add margin callouts: issue code + short description next to each flag
+  ✓  Generate summary page appended to PDF: table of all issues with severity + row ref
+  ✓  Export JSON sidecar: same issue list, machine-readable
+  ✓  Success criteria: annotated PDF opens in any viewer, issues clearly visible and correctly placed
+
+PHASE 4
+Hours 9–12
+Demo-Ready UI + End-to-End Flow
+  ✓  React frontend: drag-and-drop AFP upload → loading state → split-pane view
+  ✓  Left pane: annotated PDF rendered via pdf.js; Right pane: issue list with filter/sort
+  ✓  Click an issue in the list → PDF scrolls to and pulses the relevant highlight
+  ✓  Issue list: filter by severity, column, rule type; export as CSV
+  ✓  FastAPI endpoint wires everything together: upload → convert → extract → validate → annotate → respond
+  ✓  Docker Compose: single 'docker-compose up' starts API + frontend
+  ✓  Success criteria: judge uploads AFP, sees annotated output in under 30 seconds
+
+5.2  Realistic Timeline (12-Hour Hackathon)
+
+Hour
+Activity
+Owner
+Risk
+0–1
+Environment setup, repo, Docker skeleton, AFP sample file confirmed
+All
+LOW
+1–3
+AFP parser + table extractor (Phase 1)
+Backend
+HIGH — afplib may need patches for your AFP variant
+3–5
+Validation rules + unit tests (Phase 2)
+Backend
+LOW — pure logic, no I/O
+5–7
+PDF annotation layer (Phase 3)
+Backend
+MEDIUM — PyMuPDF coordinate mapping needs calibration
+7–9
+FastAPI integration, JSON sidecar, end-to-end test
+Backend
+LOW
+9–11
+React UI, pdf.js viewer, issue list, click-to-jump
+Frontend
+MEDIUM — pdf.js scroll sync needs work
+11–12
+Buffer: fix integration bugs, polish demo script, slides
+All
+ALWAYS NEEDED
+
+5.3  Risk Mitigation
+
+What Can Go Wrong & Our Fallbacks
+  › AFP parsing fails on real files → fallback: pre-convert 3–5 representative files to PDF, demo on those, frame AFP conversion as 'solved via IBM tooling in production'
+  › Column detection is off for this bank's layout → fallback: hardcode column x-ranges for demo file, show the configurable YAML schema for others
+  › PyMuPDF coordinate mapping is off by 1–2px → fallback: paragraph-level highlights instead of word-level — still looks great
+  › Frontend not ready → fallback: Swagger UI + Postman demo is fine for technical judges
+  › Balance reconciliation too slow on large file → fallback: process only first 100 rows in demo, note O(n) complexity is fine for production scale
+
+5.4  What Makes This Win
+
+Judging Criterion
+Our Edge
+Technical Depth
+Real AFP parsing (not just CSV processing), coordinate-aware column detection, running balance reconciliation — these are hard problems solved correctly
+Practical Value
+Every bank in the country has AFP statements. The column-bleed problem (split numbers) is a known, painful manual audit task — we automate it
+Demo Impact
+Annotated PDF is viscerally satisfying — judges see their uploaded document come back with red and amber highlights. It's instantly legible
+Scalability Story
+Pluggable rule engine + Docker + stateless API = trivially scalable. We can talk about Kafka/K8s expansion without building it
+Extensibility
+New validation rule = one new Python class. New bank format = new column config YAML. Judges can see a clear growth path
+
+BUILD IN PHASES · VALIDATE AT EACH STEP · SHOW A REAL AFP IN THE DEMO
+
+The column-bleed problem is your killer feature — make sure the demo shows it being caught

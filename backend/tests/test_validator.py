@@ -40,13 +40,27 @@ def test_balance_reconciler_micro_drift(engine):
 
 def test_column_bleed_stray_digits(engine):
     rows = [
-        TransactionRow(row_index=1, data={'Date': '01 FEB', 'Party': 'Amazon Purchase 2', 'Balance': '100.00'}, bboxes={}), # Stray 2
-        TransactionRow(row_index=2, data={'Date': '02 FEB', 'Party': 'Amazon Purchase', 'Balance': '100.00'}, bboxes={})  # Clean
+        TransactionRow(row_index=1, data={'Date': '01 FEB', 'Party': 'Amazon Purchase 2', 'Balance': '100.00'}, bboxes={}), # Stray 2 at end
+        TransactionRow(row_index=2, data={'Date': '02 FEB', 'Party': '1 Amazon Purchase', 'Balance': '100.00'}, bboxes={}), # Stray 1 at beginning
+        TransactionRow(row_index=3, data={'Date': '03 FEB', 'Party': 'Amazon Purchase', 'Balance': '100.00'}, bboxes={})  # Clean
     ]
     issues = engine.run(rows)
     bleed_issues = [i for i in issues if i.rule == 'ColumnBleedValidator']
-    assert len(bleed_issues) == 1
+    assert len(bleed_issues) == 2
     assert bleed_issues[0].row_index == 1
+    assert bleed_issues[1].row_index == 2
+
+def test_stray_characters_in_amount_columns(engine):
+    rows = [
+        TransactionRow(row_index=1, data={'Date': '01 FEB', 'Debit': '100.00 A', 'Balance': '100.00'}, bboxes={}), # Stray letter
+        TransactionRow(row_index=2, data={'Date': '02 FEB', 'Credit': '100 00', 'Balance': '200.00'}, bboxes={}), # Separated numbers
+        TransactionRow(row_index=3, data={'Date': '03 FEB', 'Credit': '100.00', 'Balance': '300.00'}, bboxes={}), # Clean
+    ]
+    issues = engine.run(rows)
+    amount_issues = [i for i in issues if i.rule == 'AmountColumnValidator' and 'Stray character' in i.message]
+    assert len(amount_issues) == 2
+    assert amount_issues[0].row_index == 1
+    assert amount_issues[1].row_index == 2
 
 def test_null_mandatory_fields(engine):
     rows = [

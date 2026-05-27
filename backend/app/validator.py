@@ -29,7 +29,7 @@ class DateFormatValidator(BaseValidator):
                     row_index=row.row_index,
                     column='Date',
                     raw_value=date_str,
-                    message='Invalid or impossible date format detected',
+                    message='Invalid or impossible date format detected (possible column bleed)',
                     bbox=row.bboxes.get('Date')
                 ))
         return issues
@@ -39,23 +39,35 @@ class AmountColumnValidator(BaseValidator):
         issues = []
         for row in rows:
             for col in ['Debit', 'Credit', 'Balance']:
-                val = row.data.get(col, '')
+                val = str(row.data.get(col, '')).strip()
                 if not val:
                     continue
                 
                 # Check for sign mismatch (e.g., negative debit)
-                if '-' in str(val) and col in ['Debit', 'Credit']:
+                if '-' in val and col in ['Debit', 'Credit']:
                     issues.append(ValidationIssue(
                         rule='AmountColumnValidator',
                         severity='WARNING',
                         row_index=row.row_index,
                         column=col,
-                        raw_value=str(val),
+                        raw_value=val,
                         message=f'Unexpected negative sign in {col}',
                         bbox=row.bboxes.get(col)
                     ))
                 
-                # We could add column bleed detection here if we had neighbor data
+                # Check for stray characters or column bleeds (e.g. "100.00 A" or "100 1")
+                clean_val = val.replace(',', '')
+                if not re.match(r'^-?\d+(?:\.\d+)?$', clean_val):
+                    issues.append(ValidationIssue(
+                        rule='AmountColumnValidator',
+                        severity='CRITICAL',
+                        row_index=row.row_index,
+                        column=col,
+                        raw_value=val,
+                        message=f'Stray character or column bleed detected in numeric field {col}',
+                        bbox=row.bboxes.get(col)
+                    ))
+                    
         return issues
 
 class BalanceReconciler(BaseValidator):
@@ -121,21 +133,20 @@ class ColumnBleedValidator(BaseValidator):
     def validate(self, rows: List[TransactionRow]) -> List[ValidationIssue]:
         issues = []
         for row in rows:
-            party_val = str(row.data.get('Party', ''))
+            party_val = str(row.data.get('Party', '')).strip()
+            if not party_val:
+                continue
             
-            # Simple heuristic: if the text column ends with a space followed by a digit, 
-            # and that digit is far right (which we simulate by just checking for isolated trailing digits 
-            # that look like they belong to amounts).
-            # e.g., "Interest Charge 1"
-            import re
-            if re.search(r'\s+\d+$', party_val):
+            # Check for isolated digits at the end OR the beginning
+            # e.g., "Interest Charge 1" or "1 Interest Charge"
+            if re.search(r'(?:^\d+\s+|\s+\d+$)', party_val):
                 issues.append(ValidationIssue(
                     rule='ColumnBleedValidator',
                     severity='CRITICAL',
                     row_index=row.row_index,
                     column='Transaction Details',
                     raw_value=party_val,
-                    message='Possible column bleed. Stray number found at the end of transaction details.',
+                    message='Possible column bleed. Stray number found in transaction details.',
                     bbox=row.bboxes.get('Party')
                 ))
         return issues

@@ -11,8 +11,10 @@ class DateFormatValidator(BaseValidator):
     def validate(self, rows: List[TransactionRow]) -> List[ValidationIssue]:
         issues = []
         for row in rows:
-            date_str = row.data.get('Date', '')
-            if not date_str:
+            date_str = str(row.data.get('Date', '')).strip()
+            
+            # Skip empty strings or literal table headers (like the word "Date")
+            if not date_str or date_str.lower() == 'date':
                 continue
             
             # Use dateutil.parse to aggressively check if the string represents a valid date.

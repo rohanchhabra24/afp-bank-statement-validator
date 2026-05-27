@@ -15,21 +15,11 @@ class DateFormatValidator(BaseValidator):
             if not date_str:
                 continue
             
-            # Regex check for DD/MM/YYYY or DD-MM-YYYY
-            if not re.match(r'^\d{2}[/-]\d{2}[/-]\d{4}$', date_str):
-                issues.append(ValidationIssue(
-                    rule='DateFormatValidator',
-                    severity='WARNING',
-                    row_index=row.row_index,
-                    column='Date',
-                    raw_value=date_str,
-                    message='Date format violation. Expected DD/MM/YYYY',
-                    bbox=row.bboxes.get('Date')
-                ))
-            
-            # Value error check
+            # Use dateutil.parse to aggressively check if the string represents a valid date.
+            # This allows flexible formats like '01 FEB', '12-12-2023', '2 DECEMBER 2024'.
             try:
-                parse(date_str, dayfirst=True)
+                # fuzzy=True allows ignoring surrounding characters if necessary
+                parse(date_str, dayfirst=True, fuzzy=False)
             except ValueError:
                 issues.append(ValidationIssue(
                     rule='DateFormatValidator',
@@ -37,7 +27,7 @@ class DateFormatValidator(BaseValidator):
                     row_index=row.row_index,
                     column='Date',
                     raw_value=date_str,
-                    message='Impossible date detected',
+                    message='Invalid or impossible date format detected',
                     bbox=row.bboxes.get('Date')
                 ))
         return issues

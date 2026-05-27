@@ -5,10 +5,60 @@ import json
 import pandas as pd
 import os
 
-st.set_page_config(page_title="AFP Validator", layout="wide")
+st.set_page_config(page_title="Financial Document Intelligence", layout="wide")
 
-st.title("📄 AFP Bank Statement Validator")
-st.markdown("Upload your AFP/PDF statement to validate anomalies like column bleeds, impossible dates, and balance drifts.")
+# Minimal Light CSS Injection
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+    
+    html, body, [class*="css"]  {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    .stApp {
+        background-color: #f8f9fa;
+        color: #212529;
+    }
+    
+    .css-1d391kg {
+        background-color: #ffffff;
+        border-radius: 8px;
+        padding: 24px;
+        border: 1px solid #e9ecef;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    }
+    
+    h1 {
+        color: #0f3b7b !important;
+        font-weight: 600;
+        letter-spacing: -0.5px;
+    }
+    
+    .stButton>button {
+        background-color: #0f3b7b;
+        color: white;
+        border-radius: 6px;
+        border: none;
+        padding: 0.5rem 1rem;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 4px rgba(15, 59, 123, 0.2);
+    }
+    
+    .stButton>button:hover {
+        background-color: #0a2956;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(15, 59, 123, 0.3);
+    }
+    
+    [data-testid="stMetricValue"] {
+        color: #0f3b7b;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("📑 Financial Document Intelligence POC")
+st.markdown("Upload any multi-page bank-related document (PDF/AFP/AFK). Our AI agent will intelligently extract and validate the contents.")
 
 API_URL = "http://127.0.0.1:8000/validate"
 
@@ -65,6 +115,10 @@ if uploaded_file is not None:
                                     mime="application/json"
                                 )
                 else:
-                    st.error(f"Server returned error code {response.status_code}")
+                    try:
+                        error_data = response.json()
+                        st.error(f"Backend Error: {error_data.get('error', 'Unknown Error')}")
+                    except:
+                        st.error(f"Server returned error code {response.status_code}")
             except Exception as e:
                 st.error(f"Failed to connect to backend: {e}")

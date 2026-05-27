@@ -26,6 +26,12 @@ python -m venv venv
 venv\Scripts\activate
 ```
 
+### 3.5. Configure API Keys
+Because this system uses state-of-the-art AI for document extraction, you must configure your OpenAI API Key. Create a new file named `.env` in the root folder and add your key:
+```env
+OPENAI_API_KEY="your-api-key-here"
+```
+
 ### 4. Install Dependencies
 Install all required libraries for the FastAPI backend and Streamlit frontend:
 ```cmd

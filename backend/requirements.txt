@@ -5,3 +5,5 @@ python-multipart
 pymupdf
 pandas
 python-dateutil
+openai
+python-dotenv

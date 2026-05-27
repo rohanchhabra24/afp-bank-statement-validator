@@ -11,68 +11,77 @@ def parse_pdf(file_path: str) -> List[TransactionRow]:
         page = doc[page_num]
         words = page.get_text("words")  # Returns (x0, y0, x1, y1, "word", block_no, line_no, word_no)
         
-        # Group words by line (y-coordinate clustering)
-        lines = []
-        words.sort(key=lambda w: w[1]) # Sort by y0
+        # Extract raw words with their coordinates
+        words = page.get_text("words")
         
-        current_line = []
-        current_y = -1
+        # Sort words primarily by y-coordinate, then by x-coordinate for a natural reading order
+        words.sort(key=lambda w: (w[1], w[0]))
+        
+        # Filter out very small or irrelevant text if necessary, but here we just pass all tokens
+        tokens = []
         for w in words:
-            if current_y == -1 or abs(w[1] - current_y) < 5: # 5px tolerance
-                current_line.append(w)
-                if current_y == -1:
-                    current_y = w[1]
-            else:
-                lines.append(current_line)
-                current_line = [w]
-                current_y = w[1]
-                
-        if current_line:
-            lines.append(current_line)
+            tokens.append({
+                "text": w[4],
+                "bbox": [round(w[0], 2), round(w[1], 2), round(w[2], 2), round(w[3], 2)]
+            })
             
-        # Parse lines into TransactionRows based on x-coordinates
-        # Note: In a real scenario, column boundaries would be dynamic or configured.
-        # This is a naive hardcoded mapping for the POC
-        # Date: 0-100, Party: 100-300, Debit: 300-400, Credit: 400-500, Balance: 500-600
+        if not tokens:
+            continue
+            
+        # Call OpenAI to intelligently parse the tokens into structured rows
+        import os
+        import json
+        from openai import OpenAI
         
-        row_idx = 1
-        for line in lines:
-            data = {}
-            bboxes = {}
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        if not client.api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is not set. Please add it to your .env file or environment.")
             
-            for w in line:
-                x0, y0, x1, y1, text, _, _, _ = w
+        prompt = f"""
+You are an expert financial document parser. You will be provided with a JSON array of text tokens and their physical bounding boxes [x0, y0, x1, y1] extracted from a bank statement page.
+Your task is to reconstruct the transaction table rows intelligently. 
+The expected columns are: "Date", "Party" (Transaction Details), "Debit", "Credit", "Balance".
+If a value is missing or empty, omit the key or set it to "".
+IMPORTANT: You MUST also provide the combined bounding boxes for each column you extract. A combined bounding box is [min_x, min_y, max_x, max_y] covering all tokens in that cell.
+
+Respond ONLY with a raw JSON array (no markdown code blocks) of objects matching this exact structure:
+[
+  {{
+    "row_index": 1,
+    "data": {{"Date": "01 FEB", "Party": "Account Balance", "Debit": "", "Credit": "", "Balance": "5,665.75"}},
+    "bboxes": {{"Date": [50.0, 450.0, 90.0, 460.0], "Party": [150.0, 450.0, 250.0, 460.0], "Balance": [650.0, 450.0, 710.0, 460.0]}}
+  }}
+]
+
+Tokens:
+{json.dumps(tokens)}
+"""
+        
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o", # Using GPT-4o for maximum accuracy per user request
+                messages=[
+                    {"role": "system", "content": "You are a precise data extraction agent. Output only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.0
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            # Clean up potential markdown formatting if the LLM ignores instructions
+            if result_text.startswith("```json"):
+                result_text = result_text[7:-3]
+            elif result_text.startswith("```"):
+                result_text = result_text[3:-3]
                 
-                # Assign to columns based on x0
-                col_name = None
-                if 0 <= x0 < 130:
-                    col_name = 'Date'
-                elif 130 <= x0 < 400:
-                    col_name = 'Party'  # We'll map Transaction Details to Party to minimize other code changes
-                elif 400 <= x0 < 500:
-                    col_name = 'Debit'
-                elif 500 <= x0 < 600:
-                    col_name = 'Credit'
-                elif 600 <= x0 < 800:
-                    col_name = 'Balance'
-                    
-                if col_name:
-                    if col_name in data:
-                        data[col_name] += ' ' + text
-                        # Expand bbox
-                        old_bbox = bboxes[col_name]
-                        bboxes[col_name] = [min(old_bbox[0], x0), min(old_bbox[1], y0), max(old_bbox[2], x1), max(old_bbox[3], y1)]
-                    else:
-                        data[col_name] = text
-                        bboxes[col_name] = [x0, y0, x1, y1]
+            extracted_data = json.loads(result_text.strip())
             
-            if data: # Only add if we found something
-                rows.append(TransactionRow(
-                    row_index=row_idx,
-                    data=data,
-                    bboxes=bboxes
-                ))
-                row_idx += 1
+            for row_data in extracted_data:
+                rows.append(TransactionRow(**row_data))
+                
+        except Exception as e:
+            print(f"Failed to parse page {page_num} using OpenAI: {e}")
+            raise e
                 
     return rows
 

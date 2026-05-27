@@ -5,6 +5,9 @@ import shutil
 import os
 import uuid
 import base64
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from .parser import parse_pdf, parse_afk
 from .validator import ValidationEngine

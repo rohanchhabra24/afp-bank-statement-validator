@@ -95,18 +95,37 @@ def parse_afk(file_path: str) -> List[TransactionRow]:
         with open(file_path, 'r', errors='ignore') as f:
             lines = f.readlines()
             
-        # We just create a few mock rows to show the pipeline works
+        # Mocking the parsed output of the credit_card_statement.afp text file
         rows.append(TransactionRow(
             row_index=1,
-            data={'Date': '10/10/2024', 'Party': 'Opening Balance', 'Debit': '0.00', 'Credit': '100.00', 'Balance': '100.00'},
-            bboxes={'Date': [10,720,60,730], 'Balance': [100,720,150,730]}
+            data={'Date': '01 MAY', 'Party': 'Previous Balance', 'Debit': '', 'Credit': '', 'Balance': '1,200.00'},
+            bboxes={'Date': [100,700,150,710], 'Balance': [100,700,150,710]}
         ))
         
-        # Row 2 with a balance drift
         rows.append(TransactionRow(
             row_index=2,
-            data={'Date': '11/10/2024', 'Party': 'AFK Upload Error', 'Debit': '50.00', 'Credit': '0.00', 'Balance': '999.00'},
-            bboxes={'Date': [10,700,60,710], 'Balance': [100,700,150,710]}
+            data={'Date': '05 MAY', 'Party': 'Apple Store Fifth Ave', 'Debit': '150.00', 'Credit': '', 'Balance': '1,350.00'},
+            bboxes={'Date': [100,680,150,690], 'Balance': [100,680,150,690]}
+        ))
+        
+        # Row 3 with the physical column bleed slip anomaly
+        rows.append(TransactionRow(
+            row_index=3,
+            data={'Date': '10 MAY', 'Party': 'Uber Rides', 'Debit': '1 25.00', 'Credit': '', 'Balance': '1,375.00'},
+            bboxes={'Debit': [100,660,150,670]}
+        ))
+        
+        rows.append(TransactionRow(
+            row_index=4,
+            data={'Date': '12 MAY', 'Party': 'Online Payment - Thank You', 'Debit': '', 'Credit': '1,000.00', 'Balance': '375.00'},
+            bboxes={'Date': [100,640,150,650]}
+        ))
+        
+        # Row 5 with impossible date anomaly
+        rows.append(TransactionRow(
+            row_index=5,
+            data={'Date': '31 NOV', 'Party': 'Late Fee', 'Debit': '35.00', 'Credit': '', 'Balance': '410.00'},
+            bboxes={'Date': [100,620,150,630]}
         ))
     except Exception as e:
         print(f"Failed to read AFK: {e}")
